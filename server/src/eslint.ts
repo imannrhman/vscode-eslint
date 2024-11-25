@@ -10,12 +10,12 @@ import { execSync } from 'child_process';
 import semverParse = require('semver/functions/parse');
 import semverGte = require('semver/functions/gte');
 
-import { TextDocument } from 'vscode-languageserver-textdocument';
+import { TextDocument, } from 'vscode-languageserver-textdocument';
 import {
 	Diagnostic, DiagnosticSeverity, DiagnosticTag, ProposedFeatures, Range, TextEdit, Files, DocumentFilter, DocumentFormattingRegistrationOptions,
-	Disposable, DocumentFormattingRequest, TextDocuments, uinteger
+	Disposable, DocumentFormattingRequest, TextDocuments, uinteger,
 } from 'vscode-languageserver/node';
-import { URI } from 'vscode-uri';
+import { URI,  } from 'vscode-uri';
 
 import { ProbeFailedParams, ProbeFailedRequest, NoESLintLibraryRequest, Status, NoConfigRequest, StatusNotification } from './shared/customMessages';
 import { ConfigurationSettings, DirectoryItem, ESLintSeverity, ModeEnum, ModeItem, PackageManagers, RuleCustomization, RuleSeverity, Validate } from './shared/settings';
@@ -69,6 +69,11 @@ type ESLintSuggestionResult = {
 	fix: ESLintAutoFixEdit;
 };
 
+type LlamaFixerSuggestionResult = {
+	desc: string;
+	fix: ESLintAutoFixEdit;
+};
+
 type ESLintProblem = {
 	line: number;
 	column: number;
@@ -79,6 +84,7 @@ type ESLintProblem = {
 	message: string;
 	fix?: ESLintAutoFixEdit;
 	suggestions?: ESLintSuggestionResult[];
+	llamaFixer?: LlamaFixerSuggestionResult;
 };
 
 type ESLintDocumentReport = {
@@ -405,7 +411,7 @@ export class Fixes {
 		if (this.isEmpty()) {
 			throw new Error('No edits recorded.');
 		}
-		return this.edits.values().next().value.documentVersion;
+		return this.edits.values()?.next()?.value?.documentVersion ?? 0;
 	}
 
 	public getScoped(diagnostics: Diagnostic[]): Problem[] {

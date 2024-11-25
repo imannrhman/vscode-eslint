@@ -4,7 +4,7 @@
  * ------------------------------------------------------------------------------------------ */
 
 import {
-	WorkspaceFolder
+	WorkspaceFolder,
 } from 'vscode-languageserver-protocol';
 
 namespace Is {
@@ -32,6 +32,10 @@ export type CodeActionSettings = {
 		commentStyle: 'line' | 'block';
 	};
 	showDocumentation: {
+		enable: boolean;
+	};
+
+	enableLlamaFixer: {
 		enable: boolean;
 	};
 };

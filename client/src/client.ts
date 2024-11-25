@@ -9,8 +9,9 @@ import * as path from 'path';
 import {
 	workspace as Workspace, window as Window, languages as Languages, Uri, TextDocument, CodeActionContext, Diagnostic,
 	Command, CodeAction, MessageItem, ConfigurationTarget, env as Env, CodeActionKind, WorkspaceConfiguration, NotebookCell, commands,
-	ExtensionContext, LanguageStatusItem, LanguageStatusSeverity, DocumentFilter as VDocumentFilter
+	ExtensionContext, LanguageStatusItem, LanguageStatusSeverity, DocumentFilter as VDocumentFilter,
 } from 'vscode';
+
 
 import {
 	LanguageClient, LanguageClientOptions, TransportKind, ErrorHandler, CloseAction, RevealOutputChannelOn, ServerOptions,
@@ -698,7 +699,8 @@ export namespace ESLintClient {
 					workspaceFolder: undefined,
 					codeAction: {
 						disableRuleComment: config.get<CodeActionSettings['disableRuleComment']>('codeAction.disableRuleComment', { enable: true, location: 'separateLine' as const, commentStyle: 'line' as const }),
-						showDocumentation: config.get<CodeActionSettings['showDocumentation']>('codeAction.showDocumentation', { enable: true })
+						showDocumentation: config.get<CodeActionSettings['showDocumentation']>('codeAction.showDocumentation', { enable: true }),
+						enableLlamaFixer: config.get<CodeActionSettings['enableLlamaFixer']>('codeAction.enableLlamaFixer', { enable: true })
 					}
 				};
 				const document: TextDocument | undefined = syncedDocuments.get(item.scopeUri);
@@ -972,3 +974,5 @@ export namespace ESLintClient {
 		}
 	}
 }
+
+

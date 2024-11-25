@@ -5,13 +5,17 @@
 import * as path from 'path';
 import { EOL } from 'os';
 
+import axios from 'axios';
+
+
 import {
 	createConnection, Diagnostic, Range, TextDocuments, TextDocumentSyncKind, TextEdit, Command, WorkspaceChange, VersionedTextDocumentIdentifier,
 	DidChangeConfigurationNotification,  CodeAction, CodeActionKind, Position, TextDocumentEdit, Message as LMessage, ResponseMessage as LResponseMessage,
-	uinteger, ServerCapabilities, NotebookDocuments, ProposedFeatures, ClientCapabilities, type FullDocumentDiagnosticReport, DocumentDiagnosticReportKind
+	uinteger, ServerCapabilities, NotebookDocuments, ProposedFeatures, ClientCapabilities, type FullDocumentDiagnosticReport, DocumentDiagnosticReportKind,
 } from 'vscode-languageserver/node';
 
-import { TextDocument } from 'vscode-languageserver-textdocument';
+
+import { TextDocument, } from 'vscode-languageserver-textdocument';
 import { URI } from 'vscode-uri';
 
 import {
@@ -179,6 +183,7 @@ namespace CommandIds {
 	export const applyDisableLine: string = 'eslint.applyDisableLine';
 	export const applyDisableFile: string = 'eslint.applyDisableFile';
 	export const openRuleDoc: string = 'eslint.openRuleDoc';
+	export const applyLlamaFixer: string = 'eslint.applyLlamaFixer';
 }
 
 connection.onInitialize((params, _cancel, progress) => {
@@ -209,6 +214,7 @@ connection.onInitialize((params, _cancel, progress) => {
 				CommandIds.applyDisableLine,
 				CommandIds.applyDisableFile,
 				CommandIds.openRuleDoc,
+				CommandIds.applyLlamaFixer,
 			]
 		},
 		diagnosticProvider: {
@@ -328,6 +334,7 @@ type RuleCodeActions = {
 	fixAll?: CodeAction;
 	disableFile?: CodeAction;
 	showDocumentation?: CodeAction;
+	fixWithLlamaFixer?: CodeAction;
 };
 
 class CodeActionResult {
@@ -341,7 +348,7 @@ class CodeActionResult {
 	public get(ruleId: string): RuleCodeActions {
 		let result: RuleCodeActions | undefined = this._actions.get(ruleId);
 		if (result === undefined) {
-			result = { fixes: [], suggestions: [] };
+			result = { fixes: [], suggestions: []};
 			this._actions.set(ruleId, result);
 		}
 		return result;
@@ -371,6 +378,10 @@ class CodeActionResult {
 			if (actions.showDocumentation) {
 				result.push(actions.showDocumentation);
 			}
+			if (actions.fixWithLlamaFixer) {
+				result.push(actions.fixWithLlamaFixer);
+			}
+
 		}
 		if (this._fixAll !== undefined) {
 			result.push(...this._fixAll);
@@ -698,11 +709,21 @@ connection.onCodeAction(async (params) => {
 				);
 			}
 		}
+
+		if (settings.codeAction.enableLlamaFixer.enable) {
+			const action = createCodeAction(
+				`Fix ${ruleId} With Llama Fixer`,
+				kind,
+				CommandIds.applyLlamaFixer,
+				CommandParams.create(textDocument, ruleId),
+			);
+			action.isPreferred = true;
+			result.get(ruleId).fixWithLlamaFixer = action;
+		}
 	}
 
 	if (result.length > 0) {
 		const sameProblems: Map<string, FixableProblem[]> = new Map<string, FixableProblem[]>(allFixableRuleIds.map<[string, FixableProblem[]]>(s => [s, []]));
-
 		for (const editInfo of fixes.getAllSorted()) {
 			if (documentVersion === -1) {
 				documentVersion = editInfo.documentVersion;
@@ -804,6 +825,63 @@ async function computeAllFixes(identifier: VersionedTextDocumentIdentifier, mode
 	}
 }
 
+async function requestLlamaFixer(identifier: VersionedTextDocumentIdentifier): Promise<TextEdit | undefined> {
+	const start = Date.now();
+	const progress = await connection.window.createWorkDoneProgress();
+
+
+	progress.begin('On Fixing', 0, 'Model Llama on Fixing', true);
+
+
+	try {
+		const uri = identifier.uri;
+		const textDocument = documents.get(uri)!;
+		const problems = CodeActions.get(uri);
+
+		if (problems !== undefined && problems.size > 0) {
+			const problem = problems.values().next().value as Problem;
+
+			let firstLine = problem.line;
+			if 	(firstLine < 3) {
+				firstLine = 3;
+			}
+
+			const ranges = Range.create(firstLine - 3, 0, problem.line + 3, uinteger.MAX_VALUE);
+
+			const errorCode = textDocument.getText(ranges);
+
+			// eslint-disable-next-line no-console
+			console.log(`error code : ${errorCode}`);
+
+
+			const response = await axios.post(
+				'https://llama-fixer.online/fix-error',
+				'',
+				{
+					params: {
+						'rule_id': problem.ruleId,
+						'message': problem.diagnostic.message,
+						'error_code': errorCode,
+					},
+					headers: {
+						'accept': 'application/json',
+						'content-type': 'application/x-www-form-urlencoded'
+					}
+				}
+			);
+			const fixCode =  response.data['fix_code'];
+
+			connection.tracer.log(`Computing fixes took: ${Date.now() - start} ms.`);
+			progress.done();
+			return TextEdit.replace(ranges, fixCode);
+		}
+
+	    return undefined;
+	} catch(error) {
+		return undefined;
+	}
+}
+
 connection.onExecuteCommand(async (params) => {
 	let workspaceChange: WorkspaceChange | undefined;
 	const commandParams: CommandParams = params.arguments![0] as CommandParams;
@@ -814,8 +892,19 @@ connection.onExecuteCommand(async (params) => {
 			const textChange = workspaceChange.getTextEditChange(commandParams);
 			edits.forEach(edit => textChange.add(edit));
 		}
+
+	} else if (params.command === CommandIds.applyLlamaFixer) {
+
+		const commandParams: CommandParams = params.arguments![0] as CommandParams;
+		const edit = await requestLlamaFixer(commandParams);
+
+		if(edit !== undefined) {
+			workspaceChange = new WorkspaceChange();
+			workspaceChange.getTextEditChange(commandParams).add(edit);
+		}
+
 	} else {
-		if ([CommandIds.applySingleFix, CommandIds.applyDisableLine, CommandIds.applyDisableFile].indexOf(params.command) !== -1) {
+		if ([ CommandIds.applySingleFix, CommandIds.applyDisableLine, CommandIds.applyDisableFile].indexOf(params.command) !== -1) {
 			workspaceChange = changes.get(`${params.command}:${commandParams.ruleId}`);
 		} else if ([CommandIds.applySuggestion].indexOf(params.command) !== -1) {
 			workspaceChange = changes.get(`${params.command}:${commandParams.ruleId}:${commandParams.sequence}`);
